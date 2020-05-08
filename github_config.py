@@ -97,12 +97,11 @@ from urllib3.exceptions import ReadTimeoutError
 from ansible.module_utils import basic
 from ansible.module_utils._text import to_bytes
 from requests.exceptions import ReadTimeout
-from yaml import load
 from github import BadCredentialsException, Github, GithubException
 try:
-    from yaml import CLoader as Loader
+    from yaml import load, CLoader as Loader
 except ImportError:
-    from yaml import Loader
+    from yaml import load, Loader
 
 
 def set_module_args(args):
@@ -183,8 +182,6 @@ class GithubManager:
                 self.config = load(f, Loader=Loader)
         except (IOError, OSError, ValueError):
             return "there was an error while reading '%s'" % path
-        except Exception as err:
-            return "there was an error parsing '%s' as YAML: %s" % (path, err)
 
         return True
 
@@ -194,7 +191,6 @@ class GithubManager:
         g = Github(self.token)
         try:
             gu = g.get_user()
-            gu.login
             self._github['user'] = gu
         except BadCredentialsException:
             return "unable to authenticate with supplied token"
@@ -207,7 +203,7 @@ class GithubManager:
         for org in self.config:
             # save the org
             try:
-                self._github['orgs'][org] = next(filter(lambda o: o.login == org, orgs))
+                self._github['orgs'][org] = next(filter(lambda o, org=org: o.login == org, orgs))
             except StopIteration:
                 return "org '%s' not found in GitHub account" % org
 
@@ -219,7 +215,7 @@ class GithubManager:
             for repo in self.config[org].get('repos', []):
                 # save the repo
                 try:
-                    self._github['repos'][org][repo['name']] = next(filter(lambda r: r.name == repo['name'], repos))
+                    self._github['repos'][org][repo['name']] = next(filter(lambda r, repo=repo: r.name == repo['name'], repos))
                 except StopIteration:
                     return "repo '%s' not found in '%s' org" % (repo['name'], org)
                 except KeyError:
@@ -230,7 +226,7 @@ class GithubManager:
             for team in self.config[org].get('teams', []):
                 # save the team
                 try:
-                    self._github['teams'][org][team['id']] = next(filter(lambda t: t.id == team['id'], self._all_teams))
+                    self._github['teams'][org][team['id']] = next(filter(lambda t, team=team: t.id == team['id'], self._all_teams))
                 except StopIteration:
                     return "team '%s' not found in '%s' org" % (team['id'], org)
                 except KeyError:
@@ -266,7 +262,7 @@ class GithubManager:
                     edit_team['privacy'] = team_config['privacy']
                     if team_config['privacy'] != team.privacy:
                         modified = True
-                
+
                 # update name, description, permission, privacy
                 if modified:
                     mods.append(self._create_mod(mod_type='team', func=team.edit, **edit_team))
@@ -285,7 +281,7 @@ class GithubManager:
                     modified = True
                 for login in to_be_added:
                     try:
-                        member = next(filter(lambda m: m.login == login, all_members))
+                        member = next(filter(lambda m, login=login: m.login == login, all_members))
                     except StopIteration:
                         self.module.fail_json(msg="'%s' does not exist as a member in the '%s' org" % (login, org))
                     mods.append(self._create_mod(mod_type='team', func=team.add_membership, member=member))
@@ -368,7 +364,6 @@ class GithubManager:
                 if modified:
                     mods.append(self._create_mod(mod_type='repo', func=repo.edit, **edit_repo))
 
-                # TODO: Once security fixes can be checked, uncomment this block
                 #  # security settings
                 #  automated_security_fixes = repo_config.get('automated_security_fixes', global_config.get('automated_security_fixes'))
                 #  if automated_security_fixes is not None:
@@ -415,7 +410,6 @@ class GithubManager:
 
                     reviews = default_branch_protection.get('required_pull_request_reviews')
                     if reviews is not None:
-                        # TODO: Support dismissal_users and dismissal_teams settings
                         dismiss_stale_reviews = reviews.get('dismiss_stale_reviews')
                         if dismiss_stale_reviews is not None:
                             edit_protection['dismiss_stale_reviews'] = dismiss_stale_reviews
@@ -440,7 +434,7 @@ class GithubManager:
                 accesses = repo_config.get('access', global_config.get('access', []))
                 for access in accesses:
                     try:
-                        team = next(filter(lambda t: t.id == access['team'], self._all_teams))
+                        team = next(filter(lambda t, access=access: t.id == access['team'], self._all_teams))
                     except StopIteration:
                         self.module.fail_json(msg="no team found with id '%s'" % access['team'])
 
@@ -455,7 +449,7 @@ class GithubManager:
                 existing_teams = [t.id for t in repo.get_teams()]
                 teams_to_remove = set(existing_teams).difference(desired_teams)
                 for team_id in teams_to_remove:
-                    team = next(filter(lambda t: t.id == team_id, self._all_teams))
+                    team = next(filter(lambda t, team_id=team_id: t.id == team_id, self._all_teams))
                     mods.append(self._create_mod(mod_type='repo', func=team.remove_from_repos, repo=repo))
                     modified = True
 
@@ -475,6 +469,7 @@ class GithubManager:
 
 
 def main():
+    """Initialize Ansible module."""
     # Parsing argument file
     module = basic.AnsibleModule(
         argument_spec=dict(
