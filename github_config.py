@@ -8,11 +8,7 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
-
+ANSIBLE_METADATA = {'metadata_version': '1.1', 'status': ['preview'], 'supported_by': 'community'}
 
 DOCUMENTATION = r'''
 ---
@@ -47,7 +43,6 @@ options:
         type: str
 '''
 
-
 EXAMPLES = r'''
 #  This example uses the following config
 #  MyOrg:
@@ -80,14 +75,12 @@ EXAMPLES = r'''
     url: https://github.mycompany.com/api/v3
 '''
 
-
 RETURN = r'''
 changed:
     description: whether the GitHub settings were modified
     returned: always
     type: bool
 '''
-
 
 import functools
 import json
@@ -215,7 +208,8 @@ class GithubManager:
             for repo in self.config[org].get('repos', []):
                 # save the repo
                 try:
-                    self._github['repos'][org][repo['name']] = next(filter(lambda r, repo=repo: r.name == repo['name'], repos))
+                    self._github['repos'][org][repo['name']] = next(
+                        filter(lambda r, repo=repo: r.name == repo['name'], repos))
                 except StopIteration:
                     return "repo '%s' not found in '%s' org" % (repo['name'], org)
                 except KeyError:
@@ -226,7 +220,8 @@ class GithubManager:
             for team in self.config[org].get('teams', []):
                 # save the team
                 try:
-                    self._github['teams'][org][team['id']] = next(filter(lambda t, team=team: t.id == team['id'], self._all_teams))
+                    self._github['teams'][org][team['id']] = next(
+                        filter(lambda t, team=team: t.id == team['id'], self._all_teams))
                 except StopIteration:
                     return "team '%s' not found in '%s' org" % (team['id'], org)
                 except KeyError:
@@ -354,7 +349,8 @@ class GithubManager:
                     edit_repo['allow_rebase_merge'] = allow_rebase_merge
                     if allow_rebase_merge != repo.allow_rebase_merge:
                         modified = True
-                delete_branch_on_merge = repo_config.get('delete_branch_on_merge', global_config.get('delete_branch_on_merge'))
+                delete_branch_on_merge = repo_config.get('delete_branch_on_merge',
+                                                         global_config.get('delete_branch_on_merge'))
                 if delete_branch_on_merge is not None:
                     edit_repo['delete_branch_on_merge'] = delete_branch_on_merge
                     if delete_branch_on_merge != repo.delete_branch_on_merge:
@@ -384,10 +380,18 @@ class GithubManager:
                     branch = repo.get_branch(default_branch)
                 except GithubException as err:
                     self.module.fail_json(msg="error while retriving branch '%s': %s" % (default_branch, err))
-                default_branch_protection = repo_config.get('default_branch_protection', global_config.get('default_branch_protection'))
+                default_branch_protection = repo_config.get('default_branch_protection',
+                                                            global_config.get('default_branch_protection'))
                 if default_branch_protection is not None:
                     modified_protection = False
-                    protection = branch.get_protection()
+                    try:
+                        protection = branch.get_protection()
+                    except GithubException:  # no protection enabled
+                        try:
+                            branch.edit_protection(True)
+                            protection = branch.get_protection()
+                        except GithubException:  # something else went wrong
+                            self.module.fail_json(msg=f"could not enable branch protection for {branch.name} on {repo}")
                     edit_protection = {}
 
                     # required status checks
@@ -395,9 +399,11 @@ class GithubManager:
                     if required_status_checks is not None:
                         edit_protection['contexts'] = required_status_checks
                         # these checks need to be added
-                        checks_missing = set(required_status_checks).difference(getattr(protection.required_status_checks, 'contexts', []))
+                        checks_missing = set(required_status_checks).difference(
+                            getattr(protection.required_status_checks, 'contexts', []))
                         # these members need to be removed
-                        too_many_checks = set(getattr(protection.required_status_checks, 'contexts', [])).difference(required_status_checks)
+                        too_many_checks = set(getattr(protection.required_status_checks, 'contexts',
+                                                      [])).difference(required_status_checks)
                         if checks_missing or too_many_checks:
                             modified_protection = True
 
@@ -413,17 +419,20 @@ class GithubManager:
                         dismiss_stale_reviews = reviews.get('dismiss_stale_reviews')
                         if dismiss_stale_reviews is not None:
                             edit_protection['dismiss_stale_reviews'] = dismiss_stale_reviews
-                            if dismiss_stale_reviews != getattr(protection.required_pull_request_reviews, 'dismiss_stale_reviews', None):
+                            if dismiss_stale_reviews != getattr(protection.required_pull_request_reviews,
+                                                                'dismiss_stale_reviews', None):
                                 modified_protection = True
                         code_owner_reviews = reviews.get('require_code_owner_reviews')
                         if code_owner_reviews is not None:
                             edit_protection['require_code_owner_reviews'] = code_owner_reviews
-                            if code_owner_reviews != getattr(protection.required_pull_request_reviews, 'require_code_owner_reviews', None):
+                            if code_owner_reviews != getattr(protection.required_pull_request_reviews,
+                                                             'require_code_owner_reviews', None):
                                 modified_protection = True
                         review_count = reviews.get('required_approving_review_count')
                         if review_count is not None:
                             edit_protection['required_approving_review_count'] = review_count
-                            if review_count != getattr(protection.required_pull_request_reviews, 'required_approving_review_count', None):
+                            if review_count != getattr(protection.required_pull_request_reviews,
+                                                       'required_approving_review_count', None):
                                 modified_protection = True
 
                     if modified_protection:
@@ -439,9 +448,14 @@ class GithubManager:
                         self.module.fail_json(msg="no team found with id '%s'" % access['team'])
 
                     desired = access.get('permission', 'pull')
-                    has_desired_permission = getattr(team.get_repo_permission(repo), desired)
-                    if not has_desired_permission:
-                        mods.append(self._create_mod(mod_type='repo', func=team.set_repo_permission, repo=repo, permission=desired))
+                    try:
+                        getattr(team.get_repo_permission(repo), desired)
+                    except AttributeError:
+                        mods.append(
+                            self._create_mod(mod_type='repo',
+                                             func=team.set_repo_permission,
+                                             repo=repo,
+                                             permission=desired))
                         modified = True
 
                 # remove teams not desired
@@ -472,13 +486,13 @@ def main():
     """Initialize Ansible module."""
     # Parsing argument file
     module = basic.AnsibleModule(
+        supports_check_mode=True,
         argument_spec=dict(
             token=dict(required=True, type='str'),
             path=dict(required=False, type='str'),
             config=dict(required=False, type='dict'),
             url=dict(required=False, type='str'),
         ),
-        supports_check_mode=True
     )
 
     manager = GithubManager(module)
